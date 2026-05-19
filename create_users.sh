@@ -24,6 +24,15 @@ get_existing_users() {
     awk -F: '$3 >= 1000 && $3 < 65534 {print $1}' /etc/passwd
 }
 
+# Funktion som filtrerar bort oönskade eller temporära konton från välkomstlistan
+ignore_user() {
+    local user="$1"
+    case "$user" in
+        codespace|\$1|\$*) return 0 ;; # hoppa över devcontainer/systemkonto och shell-variabler i /etc/passwd
+        *) return 1 ;;
+    esac
+}
+
 # Funktion för att skapa en användare
 create_user() {
     local username=$1
@@ -46,7 +55,7 @@ create_user() {
     fi
     
     # Hämta användarens hemkatalog
-    user_home="/home/$username"
+    local user_home="/home/$username"
     
     # Skapa undermappar
     mkdir -p "$user_home/Documents"
@@ -63,34 +72,43 @@ create_user() {
     chown -R "$username:$username" "$user_home/Downloads"
     chown -R "$username:$username" "$user_home/Work"
     
-    # Skapa welcome.txt med personligt meddelande
-    welcome_file="$user_home/welcome.txt"
-    
-    # Första raden: Välkomstmeddelande
+    echo "Användaren $username har skapats framgångsrikt!"
+    echo "---"
+}
+
+# Funktion för att skapa välkomstfilen efter att alla användare skapats
+create_welcome() {
+    local username=$1
+    local user_home="/home/$username"
+    local welcome_file="$user_home/welcome.txt"
+
+    if [ ! -d "$user_home" ]; then
+        echo "Fel: Hemkatalogen för $username finns inte."
+        return
+    fi
+
     echo "Välkommen $username" > "$welcome_file"
-    
-    # Lägg till lista över andra användare
     echo "" >> "$welcome_file"
     echo "Andra användare i systemet:" >> "$welcome_file"
-    
-    # Hämta alla användare utom den nuvarande
+
     get_existing_users | while read -r other_user; do
-        if [ "$other_user" != "$username" ]; then
+        if [ "$other_user" != "$username" ] && ! ignore_user "$other_user"; then
             echo "- $other_user" >> "$welcome_file"
         fi
     done
-    
-    # Sätt rätt ägare och rättigheter på welcome.txt
+
     chown "$username:$username" "$welcome_file"
     chmod 644 "$welcome_file"
-    
-    echo "Användaren $username har skapats framgångsrikt!"
-    echo "---"
 }
 
 # Huvudloop - skapa alla användare som angetts som argument
 for username in "$@"; do
     create_user "$username"
+done
+
+# Skapa välkomstfiler när alla användare har skapats
+for username in "$@"; do
+    create_welcome "$username"
 done
 
 echo "Alla användare har bearbetats."
